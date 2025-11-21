@@ -4,13 +4,30 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'floder1/**'
-      - 'floder2/**'
 
 jobs:
-  build-image1:
-    if: contains(github.event.head_commit.message, 'floder1') || github.event_name == 'push'
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      floder1_changed: ${{ steps.filter.outputs.floder1 }}
+      floder2_changed: ${{ steps.filter.outputs.floder2 }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Detect folder changes
+        id: filter
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            floder1:
+              - 'floder1/**'
+            floder2:
+              - 'floder2/**'
+
+  build-deploy-floder1:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.floder1_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -24,8 +41,26 @@ jobs:
           docker build -t myregistry.azurecr.io/image1:latest ./floder1
           docker push myregistry.azurecr.io/image1:latest
 
-  build-deploy-image2:
-    if: contains(github.event.head_commit.message, 'floder2') || github.event_name == 'push'
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          resource-group: ${{ secrets.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ secrets.AKS_CLUSTER_NAME }}
+
+      - name: Deploy floder1 to AKS
+        run: |
+          kubectl apply -f ./floder1/deployment.yaml
+          kubectl apply -f ./floder1/service.yaml
+
+  build-deploy-floder2:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.floder2_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -51,7 +86,7 @@ jobs:
           resource-group: ${{ secrets.AKS_RESOURCE_GROUP }}
           cluster-name: ${{ secrets.AKS_CLUSTER_NAME }}
 
-      - name: Deploy to AKS
+      - name: Deploy floder2 to AKS
         run: |
           kubectl apply -f ./floder2/deployment.yaml
           kubectl apply -f ./floder2/service.yaml
